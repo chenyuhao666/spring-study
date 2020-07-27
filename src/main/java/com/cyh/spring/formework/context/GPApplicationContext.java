@@ -1,11 +1,16 @@
 package com.cyh.spring.formework.context;
 
+import com.cyh.spring.formework.annotation.GPAutowired;
+import com.cyh.spring.formework.annotation.GPController;
+import com.cyh.spring.formework.annotation.GPService;
 import com.cyh.spring.formework.beans.config.GPBeanDefinition;
+import com.cyh.spring.formework.beans.config.GPBeanPostProcessor;
 import com.cyh.spring.formework.beans.config.GPBeanWrapper;
 import com.cyh.spring.formework.beans.support.GPBeanDefinitionReader;
 import com.cyh.spring.formework.beans.support.GPDefaultListableBeanFactory;
 import com.cyh.spring.formework.core.GPBeanFactory;
 
+import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -81,6 +86,84 @@ public class GPApplicationContext extends GPDefaultListableBeanFactory implement
      */
     @Override
     public Object getBean(String beanName) throws Exception {
+        GPBeanDefinition beanDefinition = super.beanDefinitionMap.get(beanName);
+
+        try{
+            /**完成通知事件*/
+            GPBeanPostProcessor beanPostProcessor = new GPBeanPostProcessor();
+            Object instance = instantiateBean(beanDefinition);
+            if(instance == null){
+                return null;
+            }
+
+            beanPostProcessor.postProcessBeforeInitialization(instance,beanName);
+
+            GPBeanWrapper beanWrapper = new GPBeanWrapper(instance);
+
+            this.factoryBeanInstanceCache.put(beanName,beanWrapper);
+
+            beanPostProcessor.postProcessAfterInitialization(instance,beanName);
+
+            populateBean(beanName, instance);
+
+            return this.factoryBeanInstanceCache.get(beanName).getWrappedInstance();
+
+        }catch (Exception e){
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    private void populateBean(String beanName, Object instance) {
+
+        Class clazz = instance.getClass();
+
+        if(!(clazz.isAnnotationPresent(GPController.class) || clazz.isAnnotationPresent(GPService.class))){
+            return;
+        }
+
+        Field[] fields = clazz.getDeclaredFields();
+
+        for(Field field : fields){
+            if(!field.isAnnotationPresent(GPAutowired.class)){
+                continue;
+            }
+
+            GPAutowired autowired = field.getAnnotation(GPAutowired.class);
+
+            String autowiredBeanName = autowired.value().trim();
+
+            if("".equals(autowiredBeanName)){
+                autowiredBeanName = field.getType().getName();
+            }
+
+            field.setAccessible(true);
+
+            try{
+                field.set(instance,this.factoryBeanInstanceCache.get(autowiredBeanName).getWrappedInstance());
+            } catch (IllegalAccessException e) {
+                e.printStackTrace();
+            }
+        }
+    }
+
+    /**传入一个beanDefinition 返回一个bean实例*/
+    private Object instantiateBean(GPBeanDefinition beanDefinition) {
+        Object instance = null;
+        String className = beanDefinition.getBeanClassName();
+        try{
+            /**根据class 才能确定一个类是否有实例*/
+            if(this.factoryBeanObjectCache.containsKey(className)){
+                instance = this.factoryBeanObjectCache.get(className);
+            }else{
+                Class<?> clazz = Class.forName(className);
+                instance = clazz.newInstance();
+                this.factoryBeanObjectCache.put(beanDefinition.getFactoryBeanName(),instance);
+            }
+            return instance;
+        }catch (Exception e){
+            e.printStackTrace();
+        }
         return null;
     }
 
